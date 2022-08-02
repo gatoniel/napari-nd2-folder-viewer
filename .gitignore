@@ -1,3 +1,5 @@
+# ignore the dev venv of python
+dev/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
