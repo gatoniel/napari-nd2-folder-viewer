@@ -10,6 +10,7 @@ import dask.array as da
 from dask.cache import Cache
 
 import nd2
+import napari
 
 from magicgui.widgets import FileEdit
 from qtpy.QtWidgets import QHBoxLayout, QPushButton, QWidget
@@ -23,11 +24,15 @@ from .exp_info import (
     to_datetime,
 )
 
-if TYPE_CHECKING:
-    import napari
-
 cache = Cache(2e10)  # Leverage twenty gigabytes of memory
 cache.register()  # Turn cache on globally
+
+
+def get_position_names(nd2_file):
+    for exp in nd2_file.experiment:
+        if exp.type == "XYPosLoop":
+            return [p.name for p in exp.parameters.points]
+    return []
 
 
 def get_zstack_size(coord_info):
@@ -192,26 +197,50 @@ class LoadWidget(QWidget):
         btn = QPushButton("Click me!")
         btn.clicked.connect(self._on_click)
 
+        pos_btn = QPushButton("Play position!")
+        pos_btn.clicked.connect(self._play_position)
+
         self.setLayout(QHBoxLayout())
         self.layout().addWidget(self.file_edit.native)
         self.layout().addWidget(btn)
+        self.layout().addWidget(pos_btn)
 
         # varibales to be defined later
         self.times = None
         self.stack = None
         self.exp_info = None
         self.chip_channel_names = None
+        self.channel_names = None
+        self.colors = None
+        self.opacities = None
+
+    def _play_position(self):
+        new_viewer = napari.Viewer()
+        position = self.viewer.dims.current_step[1]
+        z = self.viewer.dims.current_step[2]
+
+        for i in range(len(self.channel_names)):
+            new_viewer.add_image(
+                self.stack[:, position, z, i, :, :].compute(),
+                colormap=self.colors[i],
+                opacity=self.opacities[i],
+                name=self.channel_names[i],
+            )
 
     def _on_click(self):
         root = self.file_edit.value
-        nd2_files, xylen, mlen, zlen, channel_names = get_nd2_files_in_folder(
-            root
-        )
+        (
+            nd2_files,
+            xylen,
+            mlen,
+            zlen,
+            self.channel_names,
+        ) = get_nd2_files_in_folder(root)
 
         imgs, times = [], []
         for nd2_file in nd2_files:
             img, tmp_times = nd2_file_to_dask(
-                nd2_file, zlen, channel_names, mlen, xylen
+                nd2_file, zlen, self.channel_names, mlen, xylen
             )
             imgs.append(img)
             times.append(tmp_times)
@@ -219,15 +248,13 @@ class LoadWidget(QWidget):
         self.times = np.concatenate(times, axis=0)
         self.stack = da.concatenate(imgs)
 
-        colors = [color_from_name(cn) for cn in channel_names]
-        opacities = [1,] + [
+        self.colors = [color_from_name(cn) for cn in self.channel_names]
+        self.opacities = [1,] + [
             0.6,
-        ] * (len(colors) - 1)
+        ] * (len(self.colors) - 1)
 
         self.exp_info = get_exp_info(os.path.join(root, "exp-info.yaml"))
-        self.chip_channel_names = pd.read_excel(
-            os.path.join(root, "positions.xlsx"), header=None
-        )[0]
+        self.chip_channel_names = get_position_names(nd2_files[0])
 
         self.viewer.text_overlay.visible = True
         self.viewer.text_overlay.font_size = 20
@@ -235,12 +262,12 @@ class LoadWidget(QWidget):
 
         self.viewer.dims.events.current_step.connect(self.write_info)
 
-        for i in range(len(channel_names)):
+        for i in range(len(self.channel_names)):
             self.viewer.add_image(
                 self.stack[..., i, :, :],
-                colormap=colors[i],
-                opacity=opacities[i],
-                name=channel_names[i],
+                colormap=self.colors[i],
+                opacity=self.opacities[i],
+                name=self.channel_names[i],
             )
 
     def write_info(self, event):
