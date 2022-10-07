@@ -11,9 +11,15 @@ from dask.cache import Cache
 
 import nd2
 import napari
+from napari_animation import Animation
 
-from magicgui.widgets import FileEdit
-from qtpy.QtWidgets import QHBoxLayout, QPushButton, QWidget
+from magicgui.widgets import FileEdit, Slider
+from qtpy.QtWidgets import (
+    QHBoxLayout,
+    QPushButton,
+    QWidget,
+    QVBoxLayout,
+)
 
 from .exp_info import (
     get_exp_info,
@@ -177,7 +183,7 @@ def color_from_name(name):
     if "GFP" in name or "epi" in name:
         return "green"
     elif "mRuby" in name:
-        return "blue"
+        return "red"
     elif "brightfield" in name or "Brightfield" in name:
         return "gray"
     else:
@@ -200,10 +206,16 @@ class LoadWidget(QWidget):
         pos_btn = QPushButton("Play position!")
         pos_btn.clicked.connect(self._play_position)
 
-        self.setLayout(QHBoxLayout())
+        self.anim_fps_slider = Slider(value=5, min=1, max=50, step=1)
+        anim_btn = QPushButton("Animate position!")
+        anim_btn.clicked.connect(self._animate_position)
+
+        self.setLayout(QVBoxLayout())
         self.layout().addWidget(self.file_edit.native)
         self.layout().addWidget(btn)
         self.layout().addWidget(pos_btn)
+        self.layout().addWidget(self.anim_fps_slider.native)
+        self.layout().addWidget(anim_btn)
 
         # varibales to be defined later
         self.times = None
@@ -214,18 +226,113 @@ class LoadWidget(QWidget):
         self.colors = None
         self.opacities = None
 
+    def _animate_position(self):
+        animation = Animation(self.viewer)
+        self.viewer.update_console({"animation": animation})
+
+        self.viewer.reset_view()
+
+        current_step = list(self.viewer.dims.current_step)
+
+        current_step[0] = 0
+        self.viewer.dims.current_step = tuple(current_step)
+        animation.capture_keyframe()
+
+        timelen = self.stack.shape[0] - 1
+        current_step[0] = timelen
+
+        self.viewer.dims.current_step = tuple(current_step)
+        animation.capture_keyframe(steps=timelen)
+
+        pos = self.viewer.dims.current_step[1]
+        pos_name = self.chip_channel_names[pos]
+        z = self.viewer.dims.current_step[2]
+        fps = self.anim_fps_slider.value
+        animation.animate(
+            os.path.join(
+                self.file_edit.value, f"{pos_name}_pos{pos}_z{z}_fps{fps}.mov"
+            ),
+            fps=self.anim_fps_slider.value,
+            quality=9,
+        )
+
     def _play_position(self):
         new_viewer = napari.Viewer()
         position = self.viewer.dims.current_step[1]
         z = self.viewer.dims.current_step[2]
 
         for i in range(len(self.channel_names)):
-            new_viewer.add_image(
+            image_layer = new_viewer.add_image(
                 self.stack[:, position, z, i, :, :].compute(),
                 colormap=self.colors[i],
                 opacity=self.opacities[i],
                 name=self.channel_names[i],
             )
+            image_layer._keep_auto_contrast = True
+
+        def tmp_write_info(event):
+            current_step = (new_viewer.dims.current_step[0], position, z)
+
+            pos_name = self.chip_channel_names[position]
+            channel_name = pos_name.split("-")[0]
+            ch = self.exp_info.channel_infos[channel_name]
+
+            texts = [
+                pos_name
+                + " had "
+                + print_time_diff(antibiotic_exposure(ch))
+                + " hours of abx duration"
+            ]
+
+            if ch.antibiotic:
+                abx = ch.antibiotic
+                texts.append(
+                    f"{abx.name} ({abx.concentration:2.0f} {abx.concentration_unit})"
+                )
+
+            timefmt = "%Y-%m-%d %H-%M"
+
+            durations = calc_times(
+                current_step,
+                self.chip_channel_names,
+                self.exp_info,
+                self.times,
+            )
+
+            if type(durations[0]) == TimeDiff:
+                texts.append(
+                    f"Current abx time:           {print_time_diff(durations[0])}"
+                )
+            else:
+                texts.append("abx not started yet")
+
+            if type(durations[1]) == TimeDiff:
+                texts.append(
+                    f"Current regrowth time: {print_time_diff(durations[1])}"
+                )
+            else:
+                texts.append("regrowth not started yet")
+
+            current_time = to_datetime(self.times[current_step])
+            current_time = current_time.strftime(timefmt)
+            texts.append(f"Current time: {current_time}")
+
+            texts.append(
+                f"Start time:      {ch.antibiotic_start.strftime(timefmt)}"
+            )
+
+            texts.append(
+                f"End time:        {ch.antibiotic_end.strftime(timefmt)}"
+            )
+
+            text = "\n".join(texts)
+            new_viewer.text_overlay.text = text
+
+        new_viewer.text_overlay.visible = True
+        new_viewer.text_overlay.font_size = 20
+        new_viewer.text_overlay.color = "red"
+
+        new_viewer.dims.events.current_step.connect(tmp_write_info)
 
     def _on_click(self):
         root = self.file_edit.value
@@ -263,12 +370,13 @@ class LoadWidget(QWidget):
         self.viewer.dims.events.current_step.connect(self.write_info)
 
         for i in range(len(self.channel_names)):
-            self.viewer.add_image(
+            image_layer = self.viewer.add_image(
                 self.stack[..., i, :, :],
                 colormap=self.colors[i],
                 opacity=self.opacities[i],
                 name=self.channel_names[i],
             )
+            image_layer._keep_auto_contrast = True
 
     def write_info(self, event):
         position = self.viewer.dims.current_step[1]

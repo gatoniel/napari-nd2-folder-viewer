@@ -65,7 +65,7 @@ def antibiotic_exposure(single_channel: SingleChannel):
 
 def to_time_diff(td):
     hours, seconds = divmod(td.seconds, 3600)
-    return TimeDiff(hours, seconds // 60)
+    return TimeDiff(td.days * 24 + hours, seconds // 60)
 
 
 def print_time_diff(td: TimeDiff):
