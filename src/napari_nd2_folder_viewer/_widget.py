@@ -458,7 +458,8 @@ class LoadWidget(QWidget):
                 opacity=self.opacities[i],
                 name=self.channel_names[i],
             )
-            image_layer._keep_auto_contrast = True
+            # TODO: once https://github.com/napari/napari/issues/5402 is resolved
+            # image_layer._keep_auto_contrast = True
 
     def write_info(self, event):
         position = self.viewer.dims.current_step[1]
