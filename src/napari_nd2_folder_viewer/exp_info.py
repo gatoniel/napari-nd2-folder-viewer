@@ -17,6 +17,7 @@ class Molecule:
 
 @dataclass
 class SingleChannel:
+    comment: str
     antibiotic_start: str = desert.field(
         marshmallow.fields.NaiveDateTime(format="%Y-%m-%d %H-%M")
     )
@@ -33,9 +34,16 @@ class Regrowth:
 
 
 @dataclass
+class GeneralAntibioticsInfo:
+    duration_hours: int
+
+
+@dataclass
 class GeneralInfo:
-    antibiotic: Molecule
+    comment: str
+    antibiotics: GeneralAntibioticsInfo
     regrowth: Regrowth
+    invert_stage_x: bool
 
 
 @dataclass

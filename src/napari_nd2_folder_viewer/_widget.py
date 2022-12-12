@@ -11,6 +11,7 @@ from dask.cache import Cache
 
 import nd2
 import napari
+from sklearn.metrics import pairwise_distances
 from napari_animation import Animation
 
 from magicgui.widgets import FileEdit, Slider
@@ -97,6 +98,61 @@ def insert_nd2_file_channels(img_, channel_names, channel_names_):
             imgs.append(da.zeros_like(img_[..., 0, :, :]))
     img = da.stack(imgs, axis=-3)
     return img
+
+
+def get_stage_positions(nd2_file):
+    for exp in nd2_file.experiment:
+        if exp.type == "XYPosLoop":
+            return np.array([p.stagePositionUm for p in exp.parameters.points])
+    return []
+
+
+def get_position_names_and_inds(nd2_file, invert_x):
+    pos = get_stage_positions(nd2_file)
+    if invert_x:
+        pos[:, 0] *= -1
+
+    dists = pairwise_distances(pos[:, 0][:, np.newaxis]).flatten()
+
+    # beware hardcoded assumption of the distances
+    nearest_neighbors_inds = np.logical_and(dists > 2000, dists < 6000)
+    nearest_neighbors = dists[nearest_neighbors_inds]
+
+    mean_diff = nearest_neighbors.mean()
+
+    inds = []
+    total_sort = []
+
+    channel_names = np.empty(pos.shape[0], dtype=object)
+
+    x_pos = pos[:, 0]
+
+    min_x = x_pos.min()
+    std_diff = mean_diff / 3
+
+    nums = np.arange(pos.shape[0])
+
+    for i in range(10):
+        mid_ = min_x + i * mean_diff
+        min_ = mid_ - std_diff
+        max_ = mid_ + std_diff
+
+        tmp_inds = np.logical_and(min_ < x_pos, x_pos < max_)
+        inds.append(tmp_inds)
+
+        y_pos = pos[tmp_inds, 1]
+        sort_inds = np.argsort(y_pos)[::-1]
+
+        tmp_channel_names = np.empty(len(y_pos), dtype=object)
+        tmp_channel_names[sort_inds] = [
+            f"ch{i+1}-{j}" for j in range(1, len(y_pos) + 1)
+        ]
+
+        channel_names[tmp_inds] = tmp_channel_names
+
+        total_sort.append(nums[tmp_inds][sort_inds])
+
+    return inds, pos, channel_names, np.concatenate(total_sort)
 
 
 def nd2_file_to_dask(nd2_file, zlen, channel_names, mlen, xylen):
@@ -343,14 +399,22 @@ class LoadWidget(QWidget):
             zlen,
             self.channel_names,
         ) = get_nd2_files_in_folder(root)
+        self.exp_info = get_exp_info(os.path.join(root, "exp-info.yaml"))
 
         imgs, times = [], []
+        channel_names = []
         for nd2_file in nd2_files:
-            img, tmp_times = nd2_file_to_dask(
+            img_, tmp_times_ = nd2_file_to_dask(
                 nd2_file, zlen, self.channel_names, mlen, xylen
             )
+            _, _, tmp_channel_names, sort_inds = get_position_names_and_inds(
+                nd2_file, self.exp_info.general_info.invert_stage_x
+            )
+            img = img_[:, sort_inds, ...]
+            tmp_times = tmp_times_[:, sort_inds, ...]
             imgs.append(img)
             times.append(tmp_times)
+            channel_names.append(tmp_channel_names[sort_inds])
 
         self.times = np.concatenate(times, axis=0)
         self.stack = da.concatenate(imgs)
@@ -360,8 +424,7 @@ class LoadWidget(QWidget):
             0.6,
         ] * (len(self.colors) - 1)
 
-        self.exp_info = get_exp_info(os.path.join(root, "exp-info.yaml"))
-        self.chip_channel_names = get_position_names(nd2_files[0])
+        self.chip_channel_names = channel_names[0]
 
         self.viewer.text_overlay.visible = True
         self.viewer.text_overlay.font_size = 20
