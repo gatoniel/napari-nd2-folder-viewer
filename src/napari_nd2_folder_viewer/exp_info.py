@@ -44,6 +44,7 @@ class GeneralInfo:
     antibiotics: GeneralAntibioticsInfo
     regrowth: Regrowth
     invert_stage_x: bool
+    invert_stage_y: bool
 
 
 @dataclass

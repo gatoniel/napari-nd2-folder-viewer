@@ -107,7 +107,7 @@ def get_stage_positions(nd2_file):
     return []
 
 
-def get_position_names_and_inds(nd2_file, invert_x):
+def get_position_names_and_inds(nd2_file, invert_x, invert_y):
     pos = get_stage_positions(nd2_file)
     if invert_x:
         pos[:, 0] *= -1
@@ -141,7 +141,9 @@ def get_position_names_and_inds(nd2_file, invert_x):
         inds.append(tmp_inds)
 
         y_pos = pos[tmp_inds, 1]
-        sort_inds = np.argsort(y_pos)[::-1]
+        sort_inds = np.argsort(y_pos)
+        if invert_y:
+            sort_inds = sort_inds[::-1]
 
         tmp_channel_names = np.empty(len(y_pos), dtype=object)
         tmp_channel_names[sort_inds] = [
@@ -408,7 +410,9 @@ class LoadWidget(QWidget):
                 nd2_file, zlen, self.channel_names, mlen, xylen
             )
             _, _, tmp_channel_names, sort_inds = get_position_names_and_inds(
-                nd2_file, self.exp_info.general_info.invert_stage_x
+                nd2_file,
+                self.exp_info.general_info.invert_stage_x,
+                self.exp_info.general_info.invert_stage_y,
             )
             img = img_[:, sort_inds, ...]
             tmp_times = tmp_times_[:, sort_inds, ...]
