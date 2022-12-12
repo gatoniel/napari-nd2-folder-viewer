@@ -35,6 +35,18 @@ cache = Cache(2e10)  # Leverage twenty gigabytes of memory
 cache.register()  # Turn cache on globally
 
 
+def test_nd2_timestamps(times, nd2_file):
+    if np.all(np.diff(times, axis=0) == 0.0):
+        print("made afjustment")
+        period_time = nd2_file._rdr.experiment()[0].parameters.periodMs / 1000
+        in_julian = period_time / (24 * 3600)
+
+        add_time = np.arange(times.shape[0]) * in_julian
+
+        return times + add_time[:, np.newaxis, np.newaxis]
+    return times
+
+
 def get_position_names(nd2_file):
     for exp in nd2_file.experiment:
         if exp.type == "XYPosLoop":
@@ -415,12 +427,15 @@ class LoadWidget(QWidget):
                 self.exp_info.general_info.invert_stage_y,
             )
             img = img_[:, sort_inds, ...]
+            # print(tmp_times_.shape)
             tmp_times = tmp_times_[:, sort_inds, ...]
+            tested_tmp_times = test_nd2_timestamps(tmp_times, nd2_file)
             imgs.append(img)
-            times.append(tmp_times)
+            times.append(tested_tmp_times)
             channel_names.append(tmp_channel_names[sort_inds])
 
         self.times = np.concatenate(times, axis=0)
+        # print(self.times.shape)
         self.stack = da.concatenate(imgs)
 
         self.colors = [color_from_name(cn) for cn in self.channel_names]
@@ -449,6 +464,7 @@ class LoadWidget(QWidget):
         position = self.viewer.dims.current_step[1]
 
         current_step = tuple(self.viewer.dims.current_step[:3])
+        # print(current_step)
 
         pos_name = self.chip_channel_names[position]
         channel_name = pos_name.split("-")[0]
@@ -469,12 +485,15 @@ class LoadWidget(QWidget):
 
         timefmt = "%Y-%m-%d %H-%M"
 
+        # print(self.times[:, current_step[1], 1])
+
         durations = calc_times(
             current_step,
             self.chip_channel_names,
             self.exp_info,
             self.times,
         )
+        # print(durations)
 
         if type(durations[0]) == TimeDiff:
             texts.append(
