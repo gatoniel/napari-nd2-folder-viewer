@@ -36,7 +36,8 @@ cache.register()  # Turn cache on globally
 
 
 def test_nd2_timestamps(times, nd2_file):
-    if np.all(np.diff(times, axis=0) == 0.0):
+    if times.shape[0] != 1 and np.all(np.diff(times, axis=0) == 0.0):
+        print(nd2_file)
         print("made afjustment")
         period_time = nd2_file._rdr.experiment()[0].parameters.periodMs / 1000
         in_julian = period_time / (24 * 3600)
