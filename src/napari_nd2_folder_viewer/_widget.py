@@ -274,6 +274,9 @@ class LoadWidget(QWidget):
         btn = QPushButton("Click me!")
         btn.clicked.connect(self._on_click)
 
+        save_btn = QPushButton("Save analysis!")
+        save_btn.clicked.connect(self._on_save_click)
+
         pos_btn = QPushButton("Play position!")
         pos_btn.clicked.connect(self._play_position)
 
@@ -284,6 +287,7 @@ class LoadWidget(QWidget):
         self.setLayout(QVBoxLayout())
         self.layout().addWidget(self.file_edit.native)
         self.layout().addWidget(btn)
+        self.layout().addWidget(save_btn)
         self.layout().addWidget(pos_btn)
         self.layout().addWidget(self.anim_fps_slider.native)
         self.layout().addWidget(anim_btn)
@@ -296,6 +300,20 @@ class LoadWidget(QWidget):
         self.channel_names = None
         self.colors = None
         self.opacities = None
+
+        self.shape_layers = None
+        self._shape_layer_info = [
+            (
+                "shapes_Cipro_Cefta.csv",
+                "white",
+                "survival",
+            ),
+            (
+                "dead_biofilms.csv",
+                "gray",
+                "dead_biofilms",
+            ),
+        ]
 
     def _animate_position(self):
         animation = Animation(self.viewer)
@@ -406,15 +424,15 @@ class LoadWidget(QWidget):
         new_viewer.dims.events.current_step.connect(tmp_write_info)
 
     def _on_click(self):
-        root = self.file_edit.value
+        self.root = self.file_edit.value
         (
             nd2_files,
             xylen,
             mlen,
             zlen,
             self.channel_names,
-        ) = get_nd2_files_in_folder(root)
-        self.exp_info = get_exp_info(os.path.join(root, "exp-info.yaml"))
+        ) = get_nd2_files_in_folder(self.root)
+        self.exp_info = get_exp_info(os.path.join(self.root, "exp-info.yaml"))
 
         imgs, times = [], []
         channel_names = []
@@ -461,6 +479,36 @@ class LoadWidget(QWidget):
             )
             # TODO: once https://github.com/napari/napari/issues/5402 is resolved
             # image_layer._keep_auto_contrast = True
+
+        self.shape_layers = []
+        for file_name, color, name in self._shape_layer_info:
+            kwargs = dict(
+                opacity=0.7,
+                edge_width=1.0,
+                face_color="#ffffff00",
+                edge_color=color,
+                name=name,
+            )
+
+            try:
+                layer = self.viewer.open(
+                    os.path.join(self.root, file_name),
+                    layer_type="shapes",
+                    **kwargs,
+                )[0]
+            except FileNotFoundError:
+                print(
+                    f"no annotation present for {name}, creating empty shapes layer"
+                )
+                layer = self.viewer.add_shapes(None, **kwargs)
+            self.shape_layers.append(layer)
+
+    def _on_save_click(self):
+        print(self.shape_layers)
+        for layer, (file_name, _, _) in zip(
+            self.shape_layers, self._shape_layer_info
+        ):
+            layer.save(os.path.join(self.root, file_name))
 
     def write_info(self, event):
         position = self.viewer.dims.current_step[1]
