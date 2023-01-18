@@ -284,6 +284,12 @@ class LoadWidget(QWidget):
         anim_btn = QPushButton("Animate position!")
         anim_btn.clicked.connect(self._animate_position)
 
+        next_btn = QPushButton("Next annotated biofilm!")
+        next_btn.clicked.connect(self.next_biofilm)
+
+        prev_btn = QPushButton("Previous annotated biofilm!")
+        prev_btn.clicked.connect(self.prev_biofilm)
+
         self.setLayout(QVBoxLayout())
         self.layout().addWidget(self.file_edit.native)
         self.layout().addWidget(btn)
@@ -291,6 +297,8 @@ class LoadWidget(QWidget):
         self.layout().addWidget(pos_btn)
         self.layout().addWidget(self.anim_fps_slider.native)
         self.layout().addWidget(anim_btn)
+        self.layout().addWidget(next_btn)
+        self.layout().addWidget(prev_btn)
 
         # varibales to be defined later
         self.times = None
@@ -474,7 +482,9 @@ class LoadWidget(QWidget):
             image_layer = self.viewer.add_image(
                 self.stack[..., i, :, :],
                 colormap=self.colors[i],
-                opacity=self.opacities[i],
+                # opacity does not matter so much when using additive blending
+                # opacity=self.opacities[i],
+                blending="additive",
                 name=self.channel_names[i],
             )
             # TODO: once https://github.com/napari/napari/issues/5402 is resolved
@@ -500,8 +510,12 @@ class LoadWidget(QWidget):
                 print(
                     f"no annotation present for {name}, creating empty shapes layer"
                 )
-                layer = self.viewer.add_shapes(None, **kwargs)
+                layer = self.viewer.add_shapes(None, ndim=5, **kwargs)
             self.shape_layers.append(layer)
+
+        self.viewer.dims.set_current_step(0, 0)
+        self.viewer.dims.set_current_step(1, 0)
+        self.viewer.dims.set_current_step(2, 1)
 
     def _on_save_click(self):
         print(self.shape_layers)
@@ -571,3 +585,28 @@ class LoadWidget(QWidget):
 
         text = "\n".join(texts)
         self.viewer.text_overlay.text = text
+
+    def swap_step_axes(self, step):
+        return tuple(step[i] for i in [1, 0, 2])
+
+    def change_current_view(self, offset):
+        # swap step axes: (time, pos, z) -> (pos, time, z)
+        current_view = self.swap_step_axes(self.viewer.dims.current_step[:3])
+        shape_data = [
+            self.swap_step_axes(pos[0, :3])
+            for pos in self.shape_layers[0].data
+        ]
+        sorted_steps = sorted(list(set(shape_data + [current_view])))
+        current_index = sorted_steps.index(current_view)
+        new_index = (current_index + offset) % len(sorted_steps)
+        # swap step axes back: (pos, time, z) -> (time, pos, z)
+        new_view = self.swap_step_axes(sorted_steps[new_index])
+
+        for i in range(3):
+            self.viewer.dims.set_current_step(i, new_view[i])
+
+    def next_biofilm(self):
+        self.change_current_view(1)
+
+    def prev_biofilm(self):
+        self.change_current_view(-1)
