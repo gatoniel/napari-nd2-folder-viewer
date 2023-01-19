@@ -14,7 +14,7 @@ import napari
 from sklearn.metrics import pairwise_distances
 from napari_animation import Animation
 
-from magicgui.widgets import FileEdit, Slider
+from magicgui.widgets import FileEdit, Slider, Label
 from qtpy.QtWidgets import (
     QHBoxLayout,
     QPushButton,
@@ -270,6 +270,7 @@ class LoadWidget(QWidget):
         super().__init__()
         self.viewer = napari_viewer
 
+        label1 = Label(value="<b>Open and save</b>")
         self.file_edit = FileEdit(label="Folder: ", mode="d")
         btn = QPushButton("Click me!")
         btn.clicked.connect(self._on_click)
@@ -277,12 +278,14 @@ class LoadWidget(QWidget):
         save_btn = QPushButton("Save analysis!")
         save_btn.clicked.connect(self._on_save_click)
 
+        # self.anim_fps_slider = Slider(value=5, min=1, max=50, step=1)
+        # anim_btn = QPushButton("Animate position!")
+        # anim_btn.clicked.connect(self._animate_position)
+
+        label2 = Label(value="<b>Navigate through position and time</b>")
+
         pos_btn = QPushButton("Play position!")
         pos_btn.clicked.connect(self._play_position)
-
-        self.anim_fps_slider = Slider(value=5, min=1, max=50, step=1)
-        anim_btn = QPushButton("Animate position!")
-        anim_btn.clicked.connect(self._animate_position)
 
         next_btn = QPushButton("Next annotated biofilm!")
         next_btn.clicked.connect(self.next_biofilm)
@@ -291,12 +294,14 @@ class LoadWidget(QWidget):
         prev_btn.clicked.connect(self.prev_biofilm)
 
         self.setLayout(QVBoxLayout())
+        self.layout().addWidget(label1.native)
         self.layout().addWidget(self.file_edit.native)
         self.layout().addWidget(btn)
         self.layout().addWidget(save_btn)
+        # self.layout().addWidget(self.anim_fps_slider.native)
+        # self.layout().addWidget(anim_btn)
+        self.layout().addWidget(label2.native)
         self.layout().addWidget(pos_btn)
-        self.layout().addWidget(self.anim_fps_slider.native)
-        self.layout().addWidget(anim_btn)
         self.layout().addWidget(next_btn)
         self.layout().addWidget(prev_btn)
 
