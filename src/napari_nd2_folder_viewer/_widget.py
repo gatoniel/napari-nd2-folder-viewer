@@ -38,7 +38,7 @@ cache.register()  # Turn cache on globally
 def test_nd2_timestamps(times, nd2_file):
     if times.shape[0] != 1 and np.all(np.diff(times, axis=0) == 0.0):
         print(nd2_file)
-        print("made afjustment")
+        print("made adjustment")
         period_time = nd2_file._rdr.experiment()[0].parameters.periodMs / 1000
         in_julian = period_time / (24 * 3600)
 
@@ -287,11 +287,23 @@ class LoadWidget(QWidget):
         pos_btn = QPushButton("Play position!")
         pos_btn.clicked.connect(self._play_position)
 
-        next_btn = QPushButton("Next annotated biofilm!")
+        label_survival = Label(value="<b>Surviving</b>")
+
+        next_btn = QPushButton("Next annotated surviving biofilm!")
         next_btn.clicked.connect(self.next_biofilm)
 
-        prev_btn = QPushButton("Previous annotated biofilm!")
+        prev_btn = QPushButton("Previous annotated surviving biofilm!")
         prev_btn.clicked.connect(self.prev_biofilm)
+
+        label_dead = Label(value="<b>Non-surviving</b>")
+
+        next_btn_dead = QPushButton("Next annotated non-surviving biofilm!")
+        next_btn_dead.clicked.connect(self.next_biofilm_dead)
+
+        prev_btn_dead = QPushButton(
+            "Previous annotated non-surviving biofilm!"
+        )
+        prev_btn_dead.clicked.connect(self.prev_biofilm_dead)
 
         self.setLayout(QVBoxLayout())
         self.layout().addWidget(label1.native)
@@ -302,8 +314,14 @@ class LoadWidget(QWidget):
         # self.layout().addWidget(anim_btn)
         self.layout().addWidget(label2.native)
         self.layout().addWidget(pos_btn)
+
+        self.layout().addWidget(label_survival.native)
         self.layout().addWidget(next_btn)
         self.layout().addWidget(prev_btn)
+
+        self.layout().addWidget(label_dead.native)
+        self.layout().addWidget(next_btn_dead)
+        self.layout().addWidget(prev_btn_dead)
 
         # varibales to be defined later
         self.times = None
@@ -317,14 +335,20 @@ class LoadWidget(QWidget):
         self.shape_layers = None
         self._shape_layer_info = [
             (
-                "shapes_Cipro_Cefta.csv",
-                "white",
-                "survival",
+                "survival.csv",
+                dict(
+                    edge_color="white",
+                    name="survival",
+                    ndim=4,
+                ),
             ),
             (
-                "dead_biofilms.csv",
-                "gray",
-                "dead_biofilms",
+                "dead_biofilms_new.csv",
+                dict(
+                    edge_color="#2ae3ffff",
+                    name="dead_biofilms",
+                    ndim=3,
+                ),
             ),
         ]
 
@@ -468,7 +492,9 @@ class LoadWidget(QWidget):
 
         self.times = np.concatenate(times, axis=0)
         # print(self.times.shape)
-        self.stack = da.concatenate(imgs)
+        stack = da.concatenate(imgs)
+        print(stack.shape)
+        self.stack = da.transpose(stack, (2, 0, 1, 3, 4, 5))
 
         self.colors = [color_from_name(cn) for cn in self.channel_names]
         self.opacities = [1,] + [
@@ -496,14 +522,18 @@ class LoadWidget(QWidget):
             # image_layer._keep_auto_contrast = True
 
         self.shape_layers = []
-        for file_name, color, name in self._shape_layer_info:
+        for file_name, tmp_kwargs in self._shape_layer_info:
             kwargs = dict(
                 opacity=0.7,
                 edge_width=1.0,
                 face_color="#ffffff00",
-                edge_color=color,
-                name=name,
+                # color and name are now in tmp_kwargs
+                # edge_color=color,
+                # name=name,
+                # ndim is different for different layers
+                # ndim=4,
             )
+            kwargs.update(tmp_kwargs)
 
             try:
                 layer = self.viewer.open(
@@ -513,26 +543,28 @@ class LoadWidget(QWidget):
                 )[0]
             except FileNotFoundError:
                 print(
-                    f"no annotation present for {name}, creating empty shapes layer"
+                    f"no annotation present for {tmp_kwargs['name']}, creating empty shapes layer"
                 )
-                layer = self.viewer.add_shapes(None, ndim=5, **kwargs)
+                layer = self.viewer.add_shapes(None, **kwargs)
             self.shape_layers.append(layer)
 
-        self.viewer.dims.set_current_step(0, 0)
+        self.viewer.dims.axis_labels = ["z", "time", "position", "y", "x"]
+        self.viewer.dims.set_current_step(0, 1)
         self.viewer.dims.set_current_step(1, 0)
-        self.viewer.dims.set_current_step(2, 1)
+        self.viewer.dims.set_current_step(2, 0)
 
     def _on_save_click(self):
         print(self.shape_layers)
-        for layer, (file_name, _, _) in zip(
+        for layer, (file_name, _) in zip(
             self.shape_layers, self._shape_layer_info
         ):
             layer.save(os.path.join(self.root, file_name))
 
     def write_info(self, event):
-        position = self.viewer.dims.current_step[1]
-
-        current_step = tuple(self.viewer.dims.current_step[:3])
+        current_step = self.swap_axes_ztp_to_tpz(
+            tuple(self.viewer.dims.current_step[:3])
+        )
+        position = current_step[1]
         # print(current_step)
 
         pos_name = self.chip_channel_names[position]
@@ -591,27 +623,56 @@ class LoadWidget(QWidget):
         text = "\n".join(texts)
         self.viewer.text_overlay.text = text
 
-    def swap_step_axes(self, step):
-        return tuple(step[i] for i in [1, 0, 2])
+    def change_current_view_dead_biofilm(self, offset):
+        # swap step axes: (z, time, pos) -> (pos, time, z)
+        current_view = int(self.viewer.dims.current_step[2])
+        shape_data = [int(pos[0, 0]) for pos in self.shape_layers[1].data]
+
+        sorted_steps = sorted(list(set(shape_data + [current_view])))
+        current_index = sorted_steps.index(current_view)
+        new_index = (current_index + offset) % len(sorted_steps)
+        # swap step axes back: (pos, time, z) -> (time, pos, z)
+        print(current_view)
+        new_view = sorted_steps[new_index]
+        print(new_view)
+
+        self.viewer.dims.set_current_step(2, new_view)
 
     def change_current_view(self, offset):
-        # swap step axes: (time, pos, z) -> (pos, time, z)
-        current_view = self.swap_step_axes(self.viewer.dims.current_step[:3])
+        # swap step axes: (z, time, pos) -> (pos, time, z)
+        current_view = (
+            self.viewer.dims.current_step[2],
+            self.viewer.dims.current_step[1],
+        )
         shape_data = [
-            self.swap_step_axes(pos[0, :3])
+            (int(pos[0, 1]), int(pos[0, 0]))
             for pos in self.shape_layers[0].data
         ]
         sorted_steps = sorted(list(set(shape_data + [current_view])))
         current_index = sorted_steps.index(current_view)
         new_index = (current_index + offset) % len(sorted_steps)
         # swap step axes back: (pos, time, z) -> (time, pos, z)
-        new_view = self.swap_step_axes(sorted_steps[new_index])
+        print(current_view)
+        new_view = sorted_steps[new_index][::-1]
+        print(new_view)
 
-        for i in range(3):
-            self.viewer.dims.set_current_step(i, new_view[i])
+        for i in range(2):
+            self.viewer.dims.set_current_step(i + 1, new_view[i])
 
     def next_biofilm(self):
         self.change_current_view(1)
 
     def prev_biofilm(self):
         self.change_current_view(-1)
+
+    def next_biofilm_dead(self):
+        self.change_current_view_dead_biofilm(1)
+
+    def prev_biofilm_dead(self):
+        self.change_current_view_dead_biofilm(-1)
+
+    def swap_axes_ztp_to_tpz(self, axes):
+        return tuple(axes[i] for i in [1, 2, 0])
+
+    def swap_axes_tpz_to_ztp(self, axes):
+        return tuple(axes[i] for i in [2, 0, 1])
