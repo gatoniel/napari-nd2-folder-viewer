@@ -39,7 +39,12 @@ def test_nd2_timestamps(times, nd2_file):
     if times.shape[0] != 1 and np.all(np.diff(times, axis=0) == 0.0):
         print(nd2_file)
         print("made adjustment")
-        period_time = nd2_file._rdr.experiment()[0].parameters.periodMs / 1000
+        parameters = nd2_file.experiment[0].parameters
+        try:
+            period_ms = parameters.periodMs
+        except AttributeError:
+            period_ms = parameters.periods[0].periodMs
+        period_time = period_ms / 1000
         in_julian = period_time / (24 * 3600)
 
         add_time = np.arange(times.shape[0]) * in_julian
