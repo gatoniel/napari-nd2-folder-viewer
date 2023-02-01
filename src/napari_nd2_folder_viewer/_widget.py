@@ -255,6 +255,86 @@ def nd2_file_to_dask(nd2_file, zlen, channel_names, mlen, xylen):
     return img, tmp_times
 
 
+def nd2_file_to_time(nd2_file, zlen, channel_names, mlen, xylen):
+    coord_info = nd2_file._rdr._coord_info()
+
+    tlen_ = get_tstack_size(coord_info)
+    if tlen_ == 0:
+        tlen = 1
+    else:
+        tlen = tlen_
+
+    zlen_ = get_zstack_size(coord_info)
+
+    tmp_times = np.zeros((tlen, mlen, zlen))
+
+    # channel_names_ = nd2_file._rdr.channel_names()
+    # img = insert_nd2_file_channels(
+    #     nd2_file.to_dask(), channel_names, channel_names_
+    # )
+
+    # if (
+    #     tlen_ == 0
+    #     or (tlen_ == 1 and zlen_ == 0 and img.ndim == 4)
+    #     or (tlen_ == 1 and zlen_ != 0 and img.ndim == 5)
+    # ):
+    #     img = da.expand_dims(img, axis=0)
+
+    # if zlen_ == 0:
+    #     img = da.expand_dims(img, axis=2)
+
+    #     first_img = da.zeros_like(img)
+    #     shape = list(img.shape)
+    #     shape[2] = zlen - 2
+    #     last_imgs = da.zeros(
+    #         tuple(shape),
+    #         chunks=(1, 1, 1, 1, shape[4], shape[5]),
+    #         dtype=np.uint16,
+    #     )
+
+    #     img = da.concatenate([first_img, img, last_imgs], axis=2)
+
+    if tlen_ == 0 and zlen_ == 0:
+        for i in range(nd2_file.metadata.contents.frameCount):
+            k = nd2_file._rdr._coords_from_seq_index(i)
+            tmp_times[:, k, :] = (
+                nd2_file._rdr.frame_metadata(i)
+                .channels[0]
+                .time.absoluteJulianDayNumber
+            )
+
+    elif tlen_ == 0:
+        print(nd2_file)
+        # print(img.shape)
+        for i in range(nd2_file.metadata.contents.frameCount):
+            k, l = nd2_file._rdr._coords_from_seq_index(i)
+            tmp_times[:, k, l] = (
+                nd2_file._rdr.frame_metadata(i)
+                .channels[0]
+                .time.absoluteJulianDayNumber
+            )
+
+    elif zlen_ == 0:
+        for i in range(nd2_file.metadata.contents.frameCount):
+            j, k = nd2_file._rdr._coords_from_seq_index(i)
+            tmp_times[j, k, :] = (
+                nd2_file._rdr.frame_metadata(i)
+                .channels[0]
+                .time.absoluteJulianDayNumber
+            )
+
+    else:
+        for i in range(nd2_file.metadata.contents.frameCount):
+            j, k, l = nd2_file._rdr._coords_from_seq_index(i)
+            tmp_times[j, k, l] = (
+                nd2_file._rdr.frame_metadata(i)
+                .channels[0]
+                .time.absoluteJulianDayNumber
+            )
+
+    return tmp_times
+
+
 def color_from_name(name):
     if "GFP" in name or "epi" in name:
         return "green"
@@ -300,6 +380,16 @@ class LoadWidget(QWidget):
         prev_btn = QPushButton("Previous annotated surviving biofilm!")
         prev_btn.clicked.connect(self.prev_biofilm)
 
+        label_single_cell = Label(value="<b>Surviving single cells</b>")
+
+        single_next_btn = QPushButton("Next annotated single cells surviving!")
+        single_next_btn.clicked.connect(self.next_biofilm_single_cell)
+
+        single_prev_btn = QPushButton(
+            "Previous annotated single cells surviving!"
+        )
+        single_prev_btn.clicked.connect(self.prev_biofilm_single_cell)
+
         label_dead = Label(value="<b>Non-surviving</b>")
 
         next_btn_dead = QPushButton("Next annotated non-surviving biofilm!")
@@ -324,6 +414,10 @@ class LoadWidget(QWidget):
         self.layout().addWidget(next_btn)
         self.layout().addWidget(prev_btn)
 
+        self.layout().addWidget(label_single_cell.native)
+        self.layout().addWidget(single_next_btn)
+        self.layout().addWidget(single_prev_btn)
+
         self.layout().addWidget(label_dead.native)
         self.layout().addWidget(next_btn_dead)
         self.layout().addWidget(prev_btn_dead)
@@ -343,7 +437,16 @@ class LoadWidget(QWidget):
                 "survival.csv",
                 dict(
                     edge_color="white",
-                    name="survival",
+                    name="population survival",
+                    ndim=4,
+                ),
+            ),
+            (
+                "single-cell-survival.csv",
+                dict(
+                    edge_color="#55ffffff",
+                    edge_width=4,
+                    name="single cells survive",
                     ndim=4,
                 ),
             ),
@@ -631,7 +734,7 @@ class LoadWidget(QWidget):
     def change_current_view_dead_biofilm(self, offset):
         # swap step axes: (z, time, pos) -> (pos, time, z)
         current_view = int(self.viewer.dims.current_step[2])
-        shape_data = [int(pos[0, 0]) for pos in self.shape_layers[1].data]
+        shape_data = [int(pos[0, 0]) for pos in self.shape_layers[2].data]
 
         sorted_steps = sorted(list(set(shape_data + [current_view])))
         current_index = sorted_steps.index(current_view)
@@ -643,7 +746,7 @@ class LoadWidget(QWidget):
 
         self.viewer.dims.set_current_step(2, new_view)
 
-    def change_current_view(self, offset):
+    def change_current_view(self, offset, layer=0):
         # swap step axes: (z, time, pos) -> (pos, time, z)
         current_view = (
             self.viewer.dims.current_step[2],
@@ -651,7 +754,7 @@ class LoadWidget(QWidget):
         )
         shape_data = [
             (int(pos[0, 1]), int(pos[0, 0]))
-            for pos in self.shape_layers[0].data
+            for pos in self.shape_layers[layer].data
         ]
         sorted_steps = sorted(list(set(shape_data + [current_view])))
         current_index = sorted_steps.index(current_view)
@@ -669,6 +772,12 @@ class LoadWidget(QWidget):
 
     def prev_biofilm(self):
         self.change_current_view(-1)
+
+    def next_biofilm_single_cell(self):
+        self.change_current_view(1, 1)
+
+    def prev_biofilm_single_cell(self):
+        self.change_current_view(-1, 1)
 
     def next_biofilm_dead(self):
         self.change_current_view_dead_biofilm(1)
